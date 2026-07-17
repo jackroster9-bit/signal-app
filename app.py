@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import requests
 import streamlit.components.v1 as components
+from datetime import datetime
+import pytz
 
 # 1. Page Config
 st.set_page_config(page_title="Ilu Shukla's Sniper Pro", page_icon="🎯", layout="wide", initial_sidebar_state="expanded")
@@ -9,59 +11,35 @@ st.set_page_config(page_title="Ilu Shukla's Sniper Pro", page_icon="🎯", layou
 # --- CUSTOM CSS FOR PREMIUM LOOK ---
 st.markdown("""
 <style>
-    .stApp {
-        background-color: #0a0e17;
-        color: #e2e8f0;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
+    .stApp { background-color: #0a0e17; color: #e2e8f0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     
     .main-title {
-        font-size: 48px;
-        font-weight: 900;
-        text-align: center;
+        font-size: 48px; font-weight: 900; text-align: center;
         background: -webkit-linear-gradient(45deg, #00f2fe, #4facfe);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin-bottom: 0px;
-        padding-top: 20px;
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        margin-bottom: 0px; padding-top: 20px;
     }
-    .sub-title {
-        text-align: center;
-        color: #94a3b8;
-        font-size: 18px;
-        letter-spacing: 1px;
-        margin-bottom: 40px;
-    }
+    .sub-title { text-align: center; color: #94a3b8; font-size: 18px; letter-spacing: 1px; margin-bottom: 40px; }
 
     .signal-card {
-        background: rgba(30, 41, 59, 0.7);
-        backdrop-filter: blur(10px);
-        border-radius: 15px;
-        padding: 25px;
-        margin-bottom: 20px;
-        margin-top: 20px;
-        transition: transform 0.3s ease;
-        border: 1px solid rgba(255,255,255,0.1);
+        background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px);
+        border-radius: 15px; padding: 25px; margin-bottom: 20px; margin-top: 20px;
+        transition: transform 0.3s ease; border: 1px solid rgba(255,255,255,0.1);
     }
     .signal-card:hover { transform: translateY(-5px); }
     
     .buy-card { border-left: 6px solid #00e676; box-shadow: 0 10px 20px rgba(0, 230, 118, 0.1); }
     .sell-card { border-left: 6px solid #ff1744; box-shadow: 0 10px 20px rgba(255, 23, 68, 0.1); }
 
-    .card-title { font-size: 26px; font-weight: bold; margin-bottom: 15px; }
-    .buy-color { color: #00e676; }
-    .sell-color { color: #ff1744; }
+    .card-title { font-size: 26px; font-weight: bold; margin-bottom: 5px; }
+    .setup-name { font-size: 14px; color: #fbbf24; margin-bottom: 15px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+    .signal-time { font-size: 13px; color: #94a3b8; margin-bottom: 15px; font-weight: 500; }
+    .buy-color { color: #00e676; } .sell-color { color: #ff1744; }
     
     .price-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
-        gap: 15px;
-        margin-top: 15px;
-        padding-top: 15px;
-        border-top: 1px solid rgba(255,255,255,0.1);
+        display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;
+        margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);
     }
     .price-box { display: flex; flex-direction: column; }
     .price-label { font-size: 13px; color: #94a3b8; text-transform: uppercase; margin-bottom: 5px; }
@@ -70,39 +48,56 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 2. Premium Sidebar (₹ में)
+# 2. Premium Sidebar
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2619/2619283.png", width=100)
     st.markdown("## ⚙️ Trading Setup")
     st.markdown("---")
     
-    # Capital in INR
     CAPITAL = st.number_input("💵 आपकी कैपिटल (₹)", value=10000, step=1000)
     LEVERAGE = st.number_input("⚡ लिवरेज (x)", value=10, step=1)
     
     st.markdown("---")
-    TIMEFRAME = st.selectbox("⏳ Timeframe", ["1m", "5m", "15m", "30m", "1h"], index=3)
-    WINDOW = st.number_input("📏 Pivot Window", value=45, step=2)
+    st.info("🕒 **Timeframe:** 5 Minutes (Fixed for SMC)")
     TARGET_PCT = st.number_input("🎯 Target (%)", value=1.5, step=0.1) / 100
     SL_PCT = st.number_input("🛑 Stop Loss (%)", value=0.5, step=0.1) / 100
     
     st.markdown("---")
     position_size = CAPITAL * LEVERAGE
-    st.info(f"💼 **टोटल पोज़िशन साइज़:** ₹{position_size:,.0f}")
+    st.success(f"💼 **टोटल पोज़िशन साइज़:** ₹{position_size:,.0f}")
+    st.caption("💎 Smart Money Concepts: FVG, Order Blocks, Liquidity")
 
 # 3. Main Dashboard Header
 st.markdown('<div class="main-title">Ilu Shukla\'s Sniper Pro 🎯</div>', unsafe_allow_html=True)
-st.markdown(f'<div class="sub-title">Capital: ₹{CAPITAL} | Leverage: {LEVERAGE}x | Timeframe: {TIMEFRAME}</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="sub-title">SMC Algorithmic Scanner • Capital: ₹{CAPITAL} | Leverage: {LEVERAGE}x | TF: 5m</div>', unsafe_allow_html=True)
 
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "AVAXUSDT", "ADAUSDT", "DOTUSDT", "XRPUSDT", "LINKUSDT", "NEARUSDT", "RENDERUSDT", "SUIUSDT", "APTUSDT", "TONUSDT", "OPUSDT", "ARBUSDT", "LTCUSDT", "ATOMUSDT", "FTMUSDT", "INJUSDT"]
 
-def get_binance_data(symbol):
-    url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={TIMEFRAME}&limit=100"
+def get_smc_data(symbol):
+    url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval=5m&limit=100"
     try:
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
             df = pd.DataFrame(response.json(), columns=['Ot', 'Open', 'High', 'Low', 'Close', 'V', 'Ct', 'Q', 'N', 'T1', 'T2', 'I'])
-            df[['High', 'Low', 'Close']] = df[['High', 'Low', 'Close']].astype(float)
+            df[['Open', 'High', 'Low', 'Close']] = df[['Open', 'High', 'Low', 'Close']].astype(float)
+            
+            # Convert Time to IST
+            ist = pytz.timezone('Asia/Kolkata')
+            df['Time'] = pd.to_datetime(df['Ot'], unit='ms').dt.tz_localize('UTC').dt.tz_convert(ist)
+            
+            # --- 💎 SMC INDICATORS (Smart Money Concepts) ---
+            # 1. Fair Value Gaps (FVG)
+            df['Bull_FVG'] = (df['Low'] > df['High'].shift(2)) & (df['Close'] > df['Open'])
+            df['Bear_FVG'] = (df['High'] < df['Low'].shift(2)) & (df['Close'] < df['Open'])
+            
+            # 2. Order Blocks (OB) - Institutional Engulfing
+            df['Bull_OB'] = (df['Close'].shift(1) < df['Open'].shift(1)) & (df['Close'] > df['Open']) & (df['Close'] > df['High'].shift(1))
+            df['Bear_OB'] = (df['Close'].shift(1) > df['Open'].shift(1)) & (df['Close'] < df['Open']) & (df['Close'] < df['Low'].shift(1))
+            
+            # 3. Support & Resistance (Fractal Swings)
+            df['Swing_High'] = df['High'].rolling(window=5, center=True).max()
+            df['Swing_Low'] = df['Low'].rolling(window=5, center=True).min()
+            
             return df
     except:
         return None
@@ -119,7 +114,7 @@ def render_chart(symbol):
       "width": "100%",
       "height": 450,
       "symbol": "BINANCE:{symbol}",
-      "interval": "30",
+      "interval": "5",
       "timezone": "Asia/Kolkata",
       "theme": "dark",
       "style": "1",
@@ -139,69 +134,62 @@ def render_chart(symbol):
     components.html(tv_widget, height=470)
 
 # 4. Scanner Action
-st.markdown("### 🤖 Algorithmic Auto-Scanner")
+st.markdown("### 🤖 Institutional SMC Auto-Scanner (5m)")
 
-if st.button("⚡ EXECUTE SCAN", use_container_width=True, type="primary"):
-    with st.spinner(f"मार्केट को {TIMEFRAME} टाइमफ्रेम पर स्कैन किया जा रहा है... ⏳"):
+if st.button("⚡ EXECUTE SMC SCAN", use_container_width=True, type="primary"):
+    with st.spinner("स्मार्ट मनी का फुटप्रिंट (FVG & OB) स्कैन किया जा रहा है... ⏳"):
         signals_found = False
-        
-        # P&L in Rupees
         est_profit = position_size * TARGET_PCT
         est_loss = position_size * SL_PCT
         
         for symbol in SYMBOLS:
-            df = get_binance_data(symbol)
-            if df is None or len(df) < WINDOW: 
+            df = get_smc_data(symbol)
+            if df is None or len(df) < 10: 
                 continue
             
-            curr_price = float(df['Close'].iloc[-1])
+            # We check the LAST CLOSED candle (-2) so it doesn't repaint
+            curr_close = float(df['Close'].iloc[-1])
+            signal_time = df['Time'].iloc[-1].strftime("%I:%M %p") # Time formatting
             
-            df['P_High'] = df['High'].rolling(window=WINDOW, center=True).max()
-            df['P_Low'] = df['Low'].rolling(window=WINDOW, center=True).min()
-            idx = -(WINDOW // 2 + 1)
+            is_buy = False
+            is_sell = False
+            setup_name = ""
 
-            is_swing_high = df['High'].iloc[idx] == df['P_High'].iloc[idx]
-            is_swing_low = df['Low'].iloc[idx] == df['P_Low'].iloc[idx]
+            # --- SMC STRATEGY LOGIC ---
+            if df['Bull_FVG'].iloc[-2]:
+                is_buy = True
+                setup_name = "💎 SETUP: BULLISH FVG (FAIR VALUE GAP) CREATED"
+            elif df['Bull_OB'].iloc[-2]:
+                is_buy = True
+                setup_name = "💎 SETUP: BULLISH ORDER BLOCK (INSTITUTIONAL BUY)"
+            elif df['Low'].iloc[-2] == df['Swing_Low'].iloc[-3]: # Bouncing off support
+                is_buy = True
+                setup_name = "💎 SETUP: LIQUIDITY SWEEP & SUPPORT BOUNCE"
+                
+            elif df['Bear_FVG'].iloc[-2]:
+                is_sell = True
+                setup_name = "🩸 SETUP: BEARISH FVG (FAIR VALUE GAP) CREATED"
+            elif df['Bear_OB'].iloc[-2]:
+                is_sell = True
+                setup_name = "🩸 SETUP: BEARISH ORDER BLOCK (INSTITUTIONAL SELL)"
+            elif df['High'].iloc[-2] == df['Swing_High'].iloc[-3]: # Rejecting resistance
+                is_sell = True
+                setup_name = "🩸 SETUP: LIQUIDITY SWEEP & RESISTANCE REJECTION"
 
-            if is_swing_high:
+            # --- SIGNAL GENERATION ---
+            if is_buy:
                 signals_found = True
-                sl, target = curr_price * (1 + SL_PCT), curr_price * (1 - TARGET_PCT)
-                
-                html_card = f"""
-                <div class="signal-card sell-card">
-                    <div class="card-title sell-color">🔴 SELL • {symbol}</div>
-                    <div class="price-grid">
-                        <div class="price-box">
-                            <span class="price-label">Entry Price</span>
-                            <span class="price-value">${curr_price:.4f}</span>
-                        </div>
-                        <div class="price-box">
-                            <span class="price-label">Target ({TARGET_PCT*100:.1f}%)</span>
-                            <span class="price-value">${target:.4f}</span>
-                            <span class="buy-color pnl-value">+ ₹{est_profit:,.0f}</span>
-                        </div>
-                        <div class="price-box">
-                            <span class="price-label">Stop Loss ({SL_PCT*100:.1f}%)</span>
-                            <span class="price-value">${sl:.4f}</span>
-                            <span class="sell-color pnl-value">- ₹{est_loss:,.0f}</span>
-                        </div>
-                    </div>
-                </div>
-                """
-                st.markdown(html_card, unsafe_allow_html=True)
-                render_chart(symbol) # सिर्फ उसी कॉइन का चार्ट लोड होगा
-                
-            elif is_swing_low:
-                signals_found = True
-                sl, target = curr_price * (1 - SL_PCT), curr_price * (1 + TARGET_PCT)
+                sl, target = curr_close * (1 - SL_PCT), curr_close * (1 + TARGET_PCT)
                 
                 html_card = f"""
                 <div class="signal-card buy-card">
                     <div class="card-title buy-color">🟢 BUY • {symbol}</div>
+                    <div class="setup-name">⚡ {setup_name}</div>
+                    <div class="signal-time">🕒 Signal Time: {signal_time} (IST)</div>
                     <div class="price-grid">
                         <div class="price-box">
                             <span class="price-label">Entry Price</span>
-                            <span class="price-value">${curr_price:.4f}</span>
+                            <span class="price-value">${curr_close:.4f}</span>
                         </div>
                         <div class="price-box">
                             <span class="price-label">Target ({TARGET_PCT*100:.1f}%)</span>
@@ -217,9 +205,39 @@ if st.button("⚡ EXECUTE SCAN", use_container_width=True, type="primary"):
                 </div>
                 """
                 st.markdown(html_card, unsafe_allow_html=True)
-                render_chart(symbol) # सिर्फ उसी कॉइन का चार्ट लोड होगा
+                render_chart(symbol)
+                
+            elif is_sell:
+                signals_found = True
+                sl, target = curr_close * (1 + SL_PCT), curr_close * (1 - TARGET_PCT)
+                
+                html_card = f"""
+                <div class="signal-card sell-card">
+                    <div class="card-title sell-color">🔴 SELL • {symbol}</div>
+                    <div class="setup-name">⚡ {setup_name}</div>
+                    <div class="signal-time">🕒 Signal Time: {signal_time} (IST)</div>
+                    <div class="price-grid">
+                        <div class="price-box">
+                            <span class="price-label">Entry Price</span>
+                            <span class="price-value">${curr_close:.4f}</span>
+                        </div>
+                        <div class="price-box">
+                            <span class="price-label">Target ({TARGET_PCT*100:.1f}%)</span>
+                            <span class="price-value">${target:.4f}</span>
+                            <span class="buy-color pnl-value">+ ₹{est_profit:,.0f}</span>
+                        </div>
+                        <div class="price-box">
+                            <span class="price-label">Stop Loss ({SL_PCT*100:.1f}%)</span>
+                            <span class="price-value">${sl:.4f}</span>
+                            <span class="sell-color pnl-value">- ₹{est_loss:,.0f}</span>
+                        </div>
+                    </div>
+                </div>
+                """
+                st.markdown(html_card, unsafe_allow_html=True)
+                render_chart(symbol)
 
         if not signals_found:
-            st.info(f"मार्केट अभी साइडवेज़ (Consolidating) है। {TIMEFRAME} टाइमफ्रेम पर कोई नया सेटअप नहीं मिला।")
+            st.info("मार्केट अभी लिक्विडिटी ग्रैब कर रहा है। 5m टाइमफ्रेम पर कोई नया SMC (Order Block/FVG) सेटअप नहीं मिला।")
 else:
-    st.write("लाइव मार्केट सिग्नल्स और P&L चेक करने के लिए **EXECUTE SCAN** पर क्लिक करें।")
+    st.write("स्मार्ट मनी का लाइव डेटा और P&L चेक करने के लिए **EXECUTE SMC SCAN** पर क्लिक करें।")
