@@ -41,36 +41,53 @@ SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "AVAXUSDT", "ADAUSDT",
 IST = pytz.timezone("Asia/Kolkata")
 
 # ====================== DATA FETCH ======================
-@st.cache_data(ttl=25, show_spinner=False)
-def get_binance_data(symbol, limit=100, interval="1m"):
-    """Returns (df, error_message). df is None if the fetch failed — error_message
-    explains why, instead of failing silently."""
-    url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; SniperPro/1.0)"}
+def _fetch_klines(url, headers):
+    """Low-level fetch. Returns (df, error, status_code)."""
     try:
         r = requests.get(url, timeout=10, headers=headers)
-        if r.status_code == 451:
-            return None, ("Binance ne is server ki location block kar rakhi hai (HTTP 451 - "
-                           "Unavailable For Legal Reasons). Yeh aksar cloud hosting "
-                           "(Streamlit Cloud, Replit, Heroku waghera) ke US-based IP par hota hai. "
-                           "Apne computer par locally chalane par yeh normally kaam karta hai, ya "
-                           "Binance.com ki jagah Binance.US / kisi ‘spot’ endpoint / VPN try karein.")
         if r.status_code != 200:
-            return None, f"Binance API se error mila: HTTP {r.status_code} — {r.text[:200]}"
+            return None, f"HTTP {r.status_code} — {r.text[:150]}", r.status_code
         raw = r.json()
         if not isinstance(raw, list) or len(raw) == 0:
-            return None, f"Binance se khaali/ajeeb response mila: {str(raw)[:200]}"
+            return None, f"Khaali/ajeeb response: {str(raw)[:150]}", r.status_code
         df = pd.DataFrame(raw, columns=['Ot', 'Open', 'High', 'Low', 'Close', 'V',
                                          'Ct', 'Q', 'N', 'T1', 'T2', 'I'])
         df[['Open', 'High', 'Low', 'Close']] = df[['Open', 'High', 'Low', 'Close']].astype(float)
         df['Time'] = pd.to_datetime(df['Ot'], unit='ms').dt.tz_localize('UTC').dt.tz_convert(IST)
-        return df.reset_index(drop=True), None
+        return df.reset_index(drop=True), None, r.status_code
     except requests.exceptions.Timeout:
-        return None, "Request timeout ho gaya — internet slow hai ya Binance server response nahi de raha."
+        return None, "Request timeout ho gaya — internet slow hai ya server response nahi de raha.", None
     except requests.exceptions.ConnectionError as e:
-        return None, f"Connection error — Binance API tak pahunch nahi paaye: {str(e)[:200]}"
+        return None, f"Connection error: {str(e)[:150]}", None
     except Exception as e:
-        return None, f"Unexpected error: {str(e)[:200]}"
+        return None, f"Unexpected error: {str(e)[:150]}", None
+
+
+@st.cache_data(ttl=25, show_spinner=False)
+def get_binance_data(symbol, limit=100, interval="1m"):
+    """Returns (df, error_message, source). Tries Binance Futures first; many cloud
+    hosts (Streamlit Cloud, Replit, Heroku etc.) get geo-blocked (HTTP 451) on that
+    endpoint, so it automatically falls back to Binance's public spot data mirror
+    (data-api.binance.vision), which is not geo-restricted."""
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; SniperPro/1.0)"}
+
+    futures_url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    df, err, status = _fetch_klines(futures_url, headers)
+    if df is not None:
+        return df, None, "futures"
+
+    # Fallback: Binance's public spot data mirror -- designed to work from any host
+    spot_url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    df2, err2, status2 = _fetch_klines(spot_url, headers)
+    if df2 is not None:
+        return df2, None, "spot"
+
+    if status == 451:
+        combined = ("Futures API block ho gaya (HTTP 451 - geo-block, common on cloud hosting), "
+                    f"aur spot fallback bhi fail ho gaya: {err2}")
+    else:
+        combined = f"Futures error: {err} | Spot fallback error: {err2}"
+    return None, combined, None
 
 # ====================== SWING PIVOT DETECTION ======================
 def find_pivot_at(df, pos, lookback):
@@ -125,13 +142,18 @@ with tab_live:
             needed = lookback * 2 + 15
 
             fetch_errors = []
+            source_note_shown = False
             for symbol in SYMBOLS:
-                df, err = get_binance_data(symbol, limit=needed)
+                df, err, source = get_binance_data(symbol, limit=needed)
                 if df is None:
                     fetch_errors.append(f"**{symbol}**: {err}")
                     continue
                 if len(df) < needed:
                     continue
+
+                if source == "spot" and not source_note_shown:
+                    st.caption("ℹ️ Futures API is server se block hai — Binance ke public **spot** data se signals chal rahe hain (prices futures ke bahut kareeb hote hain).")
+                    source_note_shown = True
 
                 # last row is the still-forming candle -> drop it, only use closed candles
                 closed = df.iloc[:-1].reset_index(drop=True)
@@ -214,13 +236,15 @@ with tab_backtest:
 
     if st.button("▶️ Backtest Chalao", type="primary", use_container_width=True):
         with st.spinner(f"{bt_symbol} ka backtest chal raha hai..."):
-            df, err = get_binance_data(bt_symbol, limit=min(bt_candles + bt_lookback * 2 + 5, 1500), interval=bt_interval)
+            df, err, source = get_binance_data(bt_symbol, limit=min(bt_candles + bt_lookback * 2 + 5, 1500), interval=bt_interval)
 
             if df is None:
                 st.error(f"Data fetch nahi ho paaya:\n\n{err}")
             elif len(df) < bt_lookback * 3:
                 st.error("Bahut kam candles mile — 'Kitne Candles Test Karein' ki value badhayein ya interval change karein.")
             else:
+                if source == "spot":
+                    st.caption("ℹ️ Futures API is server se block hai — Binance ke public **spot** data se backtest chal raha hai.")
                 closed = df.iloc[:-1].reset_index(drop=True)  # drop forming candle
                 pivots = find_all_pivots(closed, bt_lookback)
 
