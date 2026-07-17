@@ -43,19 +43,34 @@ IST = pytz.timezone("Asia/Kolkata")
 # ====================== DATA FETCH ======================
 @st.cache_data(ttl=25, show_spinner=False)
 def get_binance_data(symbol, limit=100, interval="1m"):
+    """Returns (df, error_message). df is None if the fetch failed — error_message
+    explains why, instead of failing silently."""
     url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; SniperPro/1.0)"}
     try:
-        r = requests.get(url, timeout=8)
+        r = requests.get(url, timeout=10, headers=headers)
+        if r.status_code == 451:
+            return None, ("Binance ne is server ki location block kar rakhi hai (HTTP 451 - "
+                           "Unavailable For Legal Reasons). Yeh aksar cloud hosting "
+                           "(Streamlit Cloud, Replit, Heroku waghera) ke US-based IP par hota hai. "
+                           "Apne computer par locally chalane par yeh normally kaam karta hai, ya "
+                           "Binance.com ki jagah Binance.US / kisi ‘spot’ endpoint / VPN try karein.")
         if r.status_code != 200:
-            return None
+            return None, f"Binance API se error mila: HTTP {r.status_code} — {r.text[:200]}"
         raw = r.json()
+        if not isinstance(raw, list) or len(raw) == 0:
+            return None, f"Binance se khaali/ajeeb response mila: {str(raw)[:200]}"
         df = pd.DataFrame(raw, columns=['Ot', 'Open', 'High', 'Low', 'Close', 'V',
                                          'Ct', 'Q', 'N', 'T1', 'T2', 'I'])
         df[['Open', 'High', 'Low', 'Close']] = df[['Open', 'High', 'Low', 'Close']].astype(float)
         df['Time'] = pd.to_datetime(df['Ot'], unit='ms').dt.tz_localize('UTC').dt.tz_convert(IST)
-        return df.reset_index(drop=True)
-    except Exception:
-        return None
+        return df.reset_index(drop=True), None
+    except requests.exceptions.Timeout:
+        return None, "Request timeout ho gaya — internet slow hai ya Binance server response nahi de raha."
+    except requests.exceptions.ConnectionError as e:
+        return None, f"Connection error — Binance API tak pahunch nahi paaye: {str(e)[:200]}"
+    except Exception as e:
+        return None, f"Unexpected error: {str(e)[:200]}"
 
 # ====================== SWING PIVOT DETECTION ======================
 def find_pivot_at(df, pos, lookback):
@@ -109,9 +124,13 @@ with tab_live:
             signals_found = False
             needed = lookback * 2 + 15
 
+            fetch_errors = []
             for symbol in SYMBOLS:
-                df = get_binance_data(symbol, limit=needed)
-                if df is None or len(df) < needed:
+                df, err = get_binance_data(symbol, limit=needed)
+                if df is None:
+                    fetch_errors.append(f"**{symbol}**: {err}")
+                    continue
+                if len(df) < needed:
                     continue
 
                 # last row is the still-forming candle -> drop it, only use closed candles
@@ -165,7 +184,9 @@ with tab_live:
                 </div>
                 """, unsafe_allow_html=True)
 
-            if not signals_found:
+            if fetch_errors and not signals_found:
+                st.error("Data fetch nahi ho paaya:\n\n" + "\n\n".join(fetch_errors[:3]))
+            elif not signals_found:
                 st.info("**Abhi koi clear Swing Signal nahi mila.** Market quiet hai.")
     else:
         st.write("**Button dabakar live signals dekhein** — har signal ke saath entry time, price, target, SL aur possible profit/nuksaan (₹) dikhega.")
@@ -193,10 +214,12 @@ with tab_backtest:
 
     if st.button("▶️ Backtest Chalao", type="primary", use_container_width=True):
         with st.spinner(f"{bt_symbol} ka backtest chal raha hai..."):
-            df = get_binance_data(bt_symbol, limit=min(bt_candles + bt_lookback * 2 + 5, 1500), interval=bt_interval)
+            df, err = get_binance_data(bt_symbol, limit=min(bt_candles + bt_lookback * 2 + 5, 1500), interval=bt_interval)
 
-            if df is None or len(df) < bt_lookback * 3:
-                st.error("Data fetch nahi ho paaya. Symbol ya interval check karein.")
+            if df is None:
+                st.error(f"Data fetch nahi ho paaya:\n\n{err}")
+            elif len(df) < bt_lookback * 3:
+                st.error("Bahut kam candles mile — 'Kitne Candles Test Karein' ki value badhayein ya interval change karein.")
             else:
                 closed = df.iloc[:-1].reset_index(drop=True)  # drop forming candle
                 pivots = find_all_pivots(closed, bt_lookback)
