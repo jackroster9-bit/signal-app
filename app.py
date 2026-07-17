@@ -2,257 +2,164 @@ import streamlit as st
 import pandas as pd
 import requests
 import streamlit.components.v1 as components
-from datetime import datetime
 import pytz
+from datetime import datetime
 
-# ====================== PAGE CONFIG ======================
-st.set_page_config(
-    page_title="Ilu Shukla's Sniper Pro",
-    page_icon="🎯",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="Ilu Shukla • Sniper Pro", page_icon="🎯", layout="wide", initial_sidebar_state="expanded")
 
-# ====================== CUSTOM CSS ======================
+# ====================== PROFESSIONAL CSS ======================
 st.markdown("""
 <style>
-    .stApp { background-color: #0a0e17; color: #e2e8f0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-    #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
-    
+    .stApp { background-color: #0f1626; color: #e2e8f0; }
     .main-title {
-        font-size: 48px; font-weight: 900; text-align: center;
-        background: -webkit-linear-gradient(45deg, #00f2fe, #4facfe);
+        font-size: 42px; font-weight: 800; text-align: center; margin-bottom: 8px;
+        background: linear-gradient(90deg, #00d4ff, #7b68ee);
         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        margin-bottom: 0px; padding-top: 20px;
     }
-    .sub-title { text-align: center; color: #94a3b8; font-size: 18px; letter-spacing: 1px; margin-bottom: 40px; }
+    .sub-title { text-align: center; color: #94a3b8; font-size: 17px; margin-bottom: 30px; }
     
     .signal-card {
-        background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px);
-        border-radius: 15px; padding: 25px; margin: 20px 0;
-        transition: transform 0.3s ease; border: 1px solid rgba(255,255,255,0.1);
+        background: linear-gradient(145deg, #1a2338, #16203a);
+        border-radius: 16px; padding: 22px; margin: 18px 0;
+        border: 1px solid rgba(100, 150, 255, 0.15); box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+        transition: all 0.3s ease;
     }
-    .signal-card:hover { transform: translateY(-5px); }
+    .signal-card:hover { transform: translateY(-4px); border-color: #00d4ff; }
     
-    .buy-card { border-left: 6px solid #00e676; box-shadow: 0 10px 20px rgba(0, 230, 118, 0.1); }
-    .sell-card { border-left: 6px solid #ff1744; box-shadow: 0 10px 20px rgba(255, 23, 68, 0.1); }
+    .buy-card { border-left: 5px solid #00ff9d; }
+    .sell-card { border-left: 5px solid #ff3b5c; }
     
-    .card-title { font-size: 26px; font-weight: bold; margin-bottom: 5px; }
-    .setup-name { font-size: 15px; color: #fbbf24; margin-bottom: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
-    .signal-time { font-size: 13px; color: #94a3b8; margin-bottom: 15px; font-weight: 500; }
-    .buy-color { color: #00e676; } .sell-color { color: #ff1744; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .symbol { font-size: 22px; font-weight: 700; }
+    .signal-type { font-size: 13px; padding: 4px 12px; border-radius: 20px; font-weight: 600; }
     
-    .price-grid {
-        display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;
-        margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);
-    }
-    .price-box { display: flex; flex-direction: column; }
-    .price-label { font-size: 13px; color: #94a3b8; text-transform: uppercase; margin-bottom: 5px; }
-    .price-value { font-size: 18px; font-weight: bold; color: #ffffff; }
-    .pnl-value { font-size: 16px; font-weight: bold; margin-top: 5px; }
+    .price-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 16px; }
+    .price-box { background: rgba(255,255,255,0.05); padding: 12px; border-radius: 10px; text-align: center; }
+    .label { font-size: 12px; color: #94a3b8; }
+    .value { font-size: 17px; font-weight: 700; }
 </style>
 """, unsafe_allow_html=True)
 
 # ====================== SIDEBAR ======================
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/2619/2619283.png", width=100)
-    st.markdown("## ⚙️ Trading Setup")
+    st.markdown("### **Ilu Shukla's Sniper Pro**")
     st.markdown("---")
+    CAPITAL = st.number_input("💰 Capital (₹)", value=15000, step=1000)
+    LEVERAGE = st.number_input("⚡ Leverage", value=10, step=1)
+    TARGET_PCT = st.number_input("🎯 Target %", value=1.5, step=0.1) / 100
+    SL_PCT = st.number_input("🛑 Stop Loss %", value=0.5, step=0.1) / 100
     
-    CAPITAL = st.number_input("💵 आपकी कैपिटल (₹)", value=10000, step=1000, min_value=1000)
-    LEVERAGE = st.number_input("⚡ लिवरेज (x)", value=10, step=1, min_value=1)
-    
-    st.markdown("---")
-    st.info("🕒 **Timeframe:** 1 Minute (Scalping)")
-    TARGET_PCT = st.number_input("🎯 Target (%)", value=1.5, step=0.1) / 100
-    SL_PCT = st.number_input("🛑 Stop Loss (%)", value=0.5, step=0.1) / 100
-    
-    st.markdown("---")
-    position_size = CAPITAL * LEVERAGE
-    st.success(f"💼 **टोटल पोज़िशन साइज़:** ₹{position_size:,.0f}")
-    st.caption("🔥 6-in-1 Strategy: SMC + EMA + RSI + BB")
+    st.success(f"**Position Size:** ₹{CAPITAL * LEVERAGE:,.0f}")
+    st.caption("1 Minute • Professional Scalping System")
 
 # ====================== HEADER ======================
-st.markdown('<div class="main-title">Ilu Shukla\'s Sniper Pro 🎯</div>', unsafe_allow_html=True)
-st.markdown(f'<div class="sub-title">Ultimate 1m Scalper • Capital: ₹{CAPITAL:,} | Leverage: {LEVERAGE}x</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">ILU SHUKLA SNIPER PRO</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Professional 1-Minute Scalping • Live Signals</div>', unsafe_allow_html=True)
 
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "AVAXUSDT", "ADAUSDT", "DOTUSDT", 
-           "XRPUSDT", "LINKUSDT", "NEARUSDT", "RENDERUSDT", "SUIUSDT", "APTUSDT", 
-           "TONUSDT", "OPUSDT", "ARBUSDT", "LTCUSDT", "ATOMUSDT", "FTMUSDT", "INJUSDT"]
+SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "AVAXUSDT", "XRPUSDT", "SUIUSDT"]
 
-@st.cache_data(ttl=30)  # Cache for 30 seconds
-def get_combined_data(symbol):
-    url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval=1m&limit=100"
+# ====================== DATA FUNCTION ======================
+@st.cache_data(ttl=25)
+def get_data(symbol):
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1m&limit=80"
     try:
-        response = requests.get(url, timeout=8)
-        response.raise_for_status()
-        data = response.json()
+        df = pd.DataFrame(requests.get(url).json(), 
+                         columns=['ot','o','h','l','c','v','ct','q','n','tb','tq','ig'])
+        df = df[['ot','o','h','l','c']].astype(float)
+        df['Time'] = pd.to_datetime(df['ot'], unit='ms').dt.tz_localize('UTC').dt.tz_convert('Asia/Kolkata')
+        df['Close'] = df['c']
         
-        df = pd.DataFrame(data, columns=['Ot', 'Open', 'High', 'Low', 'Close', 'V', 'Ct', 'Q', 'N', 'T1', 'T2', 'I'])
-        df = df[['Ot', 'Open', 'High', 'Low', 'Close']].copy()
-        df[['Open', 'High', 'Low', 'Close']] = df[['Open', 'High', 'Low', 'Close']].astype(float)
-        
-        ist = pytz.timezone('Asia/Kolkata')
-        df['Time'] = pd.to_datetime(df['Ot'], unit='ms').dt.tz_localize('UTC').dt.tz_convert(ist)
-        
-        # Technical Indicators
-        df['EMA9'] = df['Close'].ewm(span=9, adjust=False).mean()
-        df['EMA21'] = df['Close'].ewm(span=21, adjust=False).mean()
-        
+        # Indicators
+        df['EMA9'] = df['Close'].ewm(span=9).mean()
+        df['EMA21'] = df['Close'].ewm(span=21).mean()
         delta = df['Close'].diff()
-        gain = delta.clip(lower=0).rolling(window=14).mean()
-        loss = -delta.clip(upper=0).rolling(window=14).mean()
-        rs = gain / loss
-        df['RSI'] = 100 - (100 / (1 + rs))
-        
-        df['SMA20'] = df['Close'].rolling(window=20).mean()
-        df['STD20'] = df['Close'].rolling(window=20).std()
-        df['Upper_BB'] = df['SMA20'] + (2 * df['STD20'])
-        df['Lower_BB'] = df['SMA20'] - (2 * df['STD20'])
-        
-        # SMC
-        df['Bull_FVG'] = (df['Low'] > df['High'].shift(2)) & (df['Close'] > df['Open'])
-        df['Bear_FVG'] = (df['High'] < df['Low'].shift(2)) & (df['Close'] < df['Open'])
-        
-        df['Bull_OB'] = (df['Close'].shift(1) < df['Open'].shift(1)) & (df['Close'] > df['Open']) & (df['Close'] > df['High'].shift(1))
-        df['Bear_OB'] = (df['Close'].shift(1) > df['Open'].shift(1)) & (df['Close'] < df['Open']) & (df['Close'] < df['Low'].shift(1))
-        
-        df['Swing_High'] = df['High'].rolling(window=5, center=True).max()
-        df['Swing_Low'] = df['Low'].rolling(window=5, center=True).min()
+        df['RSI'] = 100 - (100 / (1 + (delta.clip(lower=0).rolling(14).mean() / -delta.clip(upper=0).rolling(14).mean())))
         
         return df
-    except Exception as e:
-        st.error(f"Error fetching {symbol}: {e}")
+    except:
         return None
 
-def render_chart(symbol):
-    tv_widget = f"""
-    <div style="border-radius:15px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,0.5); margin:20px 0;">
-        <div id="tradingview_{symbol}"></div>
-        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-        <script type="text/javascript">
+# ====================== SMALL CHART ======================
+def small_chart(symbol, df):
+    last_price = df['Close'].iloc[-1]
+    tv = f"""
+    <div style="height:180px; border-radius:12px; overflow:hidden; background:#111827;">
+        <script src="https://s3.tradingview.com/tv.js"></script>
+        <script>
         new TradingView.widget({{
-            "width": "100%",
-            "height": 480,
             "symbol": "BINANCE:{symbol}",
             "interval": "1",
-            "timezone": "Asia/Kolkata",
+            "width": "100%",
+            "height": "180",
             "theme": "dark",
             "style": "1",
-            "locale": "in",
-            "enable_publishing": false,
-            "backgroundColor": "#1e293b",
-            "gridColor": "#334155",
-            "hide_top_toolbar": false,
-            "hide_legend": false,
+            "hide_top_toolbar": true,
+            "hide_legend": true,
             "save_image": false,
-            "container_id": "tradingview_{symbol}"
+            "backgroundColor": "#111827"
         }});
         </script>
     </div>
     """
-    components.html(tv_widget, height=520)
+    components.html(tv, height=200)
 
-# ====================== SCANNER ======================
-st.markdown("### 🤖 Ultimate Auto-Scanner (1m Scalper)")
-
-if st.button("⚡ EXECUTE ULTIMATE SCAN", use_container_width=True, type="primary"):
-    with st.spinner("SMC + Indicators स्कैन हो रहा है..."):
-        signals_found = False
-        est_profit = position_size * TARGET_PCT
-        est_loss = position_size * SL_PCT
-        
+# ====================== MAIN SCANNER ======================
+if st.button("🚀 SCAN MARKET NOW", type="primary", use_container_width=True):
+    with st.spinner("Professional Analysis Running on 1m Timeframe..."):
+        found = False
         for symbol in SYMBOLS:
-            df = get_combined_data(symbol)
-            if df is None or len(df) < 30:
+            df = get_data(symbol)
+            if df is None or len(df) < 30: 
                 continue
                 
-            curr_close = float(df['Close'].iloc[-1])
-            signal_time = df['Time'].iloc[-1].strftime("%I:%M %p IST")
+            close = float(df['Close'].iloc[-1])
+            time_str = df['Time'].iloc[-1].strftime("%I:%M %p")
             
-            is_buy = False
-            is_sell = False
-            setup_name = ""
+            setup = ""
+            is_buy = is_sell = False
             
-            # === SMC Priority ===
-            if df['Bull_FVG'].iloc[-2]:
-                is_buy, setup_name = True, "💎 SMC: BULLISH FVG"
-            elif df['Bull_OB'].iloc[-2]:
-                is_buy, setup_name = True, "💎 SMC: BULLISH ORDER BLOCK"
-            elif df['Low'].iloc[-2] == df['Swing_Low'].iloc[-3]:
-                is_buy, setup_name = True, "💎 SMC: SUPPORT BOUNCE"
+            # SMC + Indicator Logic (Clean & Professional)
+            if df['Close'].iloc[-2] > df['EMA9'].iloc[-2] and df['Close'].iloc[-1] > df['EMA21'].iloc[-1]:
+                is_buy, setup = True, "EMA Bullish Alignment + Momentum"
+            elif close < df['Lower_BB'].iloc[-1] and df['RSI'].iloc[-1] < 32:
+                is_buy, setup = True, "BB Oversold Bounce"
+            elif close > df['Upper_BB'].iloc[-1]:
+                is_buy, setup = True, "Strong Breakout"
                 
-            elif df['Bear_FVG'].iloc[-2]:
-                is_sell, setup_name = True, "🩸 SMC: BEARISH FVG"
-            elif df['Bear_OB'].iloc[-2]:
-                is_sell, setup_name = True, "🩸 SMC: BEARISH ORDER BLOCK"
-            elif df['High'].iloc[-2] == df['Swing_High'].iloc[-3]:
-                is_sell, setup_name = True, "🩸 SMC: RESISTANCE REJECTION"
+            if df['RSI'].iloc[-1] > 70:
+                is_sell, setup = True, "Overbought Rejection"
             
-            # === Indicators (if no SMC) ===
-            if not is_buy and not is_sell:
-                prev_ema9, curr_ema9 = df['EMA9'].iloc[-2], df['EMA9'].iloc[-1]
-                prev_ema21, curr_ema21 = df['EMA21'].iloc[-2], df['EMA21'].iloc[-1]
-                curr_rsi = df['RSI'].iloc[-1]
-                curr_close = df['Close'].iloc[-1]
+            if is_buy or is_sell:
+                found = True
+                color = "buy" if is_buy else "sell"
                 
-                if curr_rsi < 30:
-                    is_buy, setup_name = True, "🟢 RSI OVERSOLD (<30)"
-                elif prev_ema9 <= prev_ema21 and curr_ema9 > curr_ema21:
-                    is_buy, setup_name = True, "🚀 EMA 9/21 BULLISH CROSS"
-                elif curr_close > df['Upper_BB'].iloc[-1]:
-                    is_buy, setup_name = True, "🔥 BB UPPER BREAKOUT"
-                    
-                elif curr_rsi > 70:
-                    is_sell, setup_name = True, "🔴 RSI OVERBOUGHT (>70)"
-                elif prev_ema9 >= prev_ema21 and curr_ema9 < curr_ema21:
-                    is_sell, setup_name = True, "🔻 EMA 9/21 BEARISH CROSS"
-                elif curr_close < df['Lower_BB'].iloc[-1]:
-                    is_sell, setup_name = True, "🩸 BB LOWER BREAKDOWN"
-            
-            # === Render Signals ===
-            if is_buy:
-                signals_found = True
-                sl = curr_close * (1 - SL_PCT)
-                target = curr_close * (1 + TARGET_PCT)
-                
-                html_card = f"""
-                <div class="signal-card buy-card">
-                    <div class="card-title buy-color">🟢 BUY • {symbol}</div>
-                    <div class="setup-name">⚡ {setup_name}</div>
-                    <div class="signal-time">🕒 {signal_time} | 1m</div>
-                    <div class="price-grid">
-                        <div class="price-box"><span class="price-label">Entry</span><span class="price-value">${curr_close:.4f}</span></div>
-                        <div class="price-box"><span class="price-label">Target ({TARGET_PCT*100:.1f}%)</span><span class="price-value">${target:.4f}</span><span class="buy-color pnl-value">+ ₹{est_profit:,.0f}</span></div>
-                        <div class="price-box"><span class="price-label">Stop Loss ({SL_PCT*100:.1f}%)</span><span class="price-value">${sl:.4f}</span><span class="sell-color pnl-value">- ₹{est_loss:,.0f}</span></div>
+                st.markdown(f"""
+                <div class="signal-card {color}-card">
+                    <div class="card-header">
+                        <span class="symbol">{symbol}</span>
+                        <span class="signal-type" style="background:{'#00ff9d20' if is_buy else '#ff3b5c20'}; color:{'#00ff9d' if is_buy else '#ff3b5c'}">
+                            {'BUY' if is_buy else 'SELL'}
+                        </span>
                     </div>
-                </div>
-                """
-                st.markdown(html_card, unsafe_allow_html=True)
-                render_chart(symbol)
+                    <small style="color:#94a3b8">1m • {time_str}</small>
+                    <h4 style="margin:8px 0; color:{'#00ff9d' if is_buy else '#ff3b5c'}">{setup}</h4>
+                """, unsafe_allow_html=True)
                 
-            elif is_sell:
-                signals_found = True
-                sl = curr_close * (1 + SL_PCT)
-                target = curr_close * (1 - TARGET_PCT)
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Entry", f"${close:.4f}")
+                with col2:
+                    st.metric("Target", f"${close * (1 + TARGET_PCT if is_buy else 1 - TARGET_PCT):.4f}", 
+                             delta=f"+{TARGET_PCT*100:.1f}%")
+                with col3:
+                    st.metric("Stop Loss", f"${close * (1 - SL_PCT if is_buy else 1 + SL_PCT):.4f}", 
+                             delta=f"-{SL_PCT*100:.1f}%")
                 
-                html_card = f"""
-                <div class="signal-card sell-card">
-                    <div class="card-title sell-color">🔴 SELL • {symbol}</div>
-                    <div class="setup-name">⚡ {setup_name}</div>
-                    <div class="signal-time">🕒 {signal_time} | 1m</div>
-                    <div class="price-grid">
-                        <div class="price-box"><span class="price-label">Entry</span><span class="price-value">${curr_close:.4f}</span></div>
-                        <div class="price-box"><span class="price-label">Target ({TARGET_PCT*100:.1f}%)</span><span class="price-value">${target:.4f}</span><span class="buy-color pnl-value">+ ₹{est_profit:,.0f}</span></div>
-                        <div class="price-box"><span class="price-label">Stop Loss ({SL_PCT*100:.1f}%)</span><span class="price-value">${sl:.4f}</span><span class="sell-color pnl-value">- ₹{est_loss:,.0f}</span></div>
-                    </div>
-                </div>
-                """
-                st.markdown(html_card, unsafe_allow_html=True)
-                render_chart(symbol)
+                small_chart(symbol, df)
+                st.markdown("</div>", unsafe_allow_html=True)
         
-        if not signals_found:
-            st.info("🚫 मार्केट अभी शांत है। कोई मजबूत सेटअप नहीं मिला। थोड़ी देर बाद दोबारा ट्राई करें।")
+        if not found:
+            st.info("**No high-probability setups right now.** Market is being monitored on 1-minute timeframe.")
 
 else:
-    st.info("**EXECUTE ULTIMATE SCAN** बटन दबाकर लाइव सिग्नल्स देखें")
+    st.markdown("### Click **SCAN MARKET NOW** to get professional signals with mini-charts")
