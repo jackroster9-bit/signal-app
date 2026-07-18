@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import requests
 import pytz
+import time
 
 st.set_page_config(page_title="Ilu Shukla's Sniper Pro", page_icon="🎯", layout="wide")
 
@@ -244,6 +245,15 @@ def calc_ml_filter(df, alpha_trend, atr_len=ML_ATR_LEN, vol_len=ML_VOL_LEN,
     ml_conf_s = pd.Series(ml_conf, index=df.index)
     return ml_conf_s, ml_conf_s >= min_conf
 
+def calc_ref_candle(df):
+    """Daily High/Low Reference Candle: the very first candle of each day sets a
+    high/low range; that range stays fixed for the rest of the day and is used as
+    a breakout trigger (price must break above/below it, on top of the other filters)."""
+    date = df['Time'].dt.date
+    ref_high = df.groupby(date)['High'].transform('first')
+    ref_low = df.groupby(date)['Low'].transform('first')
+    return ref_high, ref_low
+
 def add_all_indicators(df, ema_length=9):
     df = df.copy()
     df['EMA'] = df['Close'].ewm(span=ema_length, adjust=False).mean()
@@ -256,11 +266,12 @@ def add_all_indicators(df, ema_length=9):
     df['AT_Bearish'] = at_bear
     df['FVG_Long'], df['FVG_Short'] = calc_fvg(df)
     df['BOS_Long'], df['BOS_Short'] = calc_bos(df)
+    df['RefHigh'], df['RefLow'] = calc_ref_candle(df)
     df['ML_Conf'], df['ML_Zone'] = calc_ml_filter(df, alpha_trend)
     return df
 
 def generate_signals(df, use_ema=True, use_vwap=True, use_adx=False, use_vol=False,
-                      use_fvg=False, use_bos=False, use_ml=True):
+                      use_fvg=False, use_bos=False, use_ml=True, use_ref_candle=False):
     true_s = pd.Series(True, index=df.index)
     ema_call = (df['Close'] > df['EMA']) if use_ema else true_s
     ema_put = (df['Close'] < df['EMA']) if use_ema else true_s
@@ -277,8 +288,16 @@ def generate_signals(df, use_ema=True, use_vwap=True, use_adx=False, use_vol=Fal
     unified_buy = ema_call & vwap_call & adx_ok & vol_ok & fvg_long & bos_long & df['AT_Bullish'] & ml_zone
     unified_sell = ema_put & vwap_put & adx_ok & vol_ok & fvg_short & bos_short & df['AT_Bearish'] & ml_zone
 
-    raw_buy = unified_buy & (~unified_buy.shift(1).fillna(False))
-    raw_sell = unified_sell & (~unified_sell.shift(1).fillna(False))
+    if use_ref_candle:
+        # breakout above/below the day's opening reference candle, still gated by all other filters
+        buy_cond = (df['High'] >= df['RefHigh']) & unified_buy
+        sell_cond = (df['Low'] <= df['RefLow']) & unified_sell
+    else:
+        buy_cond = unified_buy
+        sell_cond = unified_sell
+
+    raw_buy = buy_cond & (~buy_cond.shift(1).fillna(False))
+    raw_sell = sell_cond & (~sell_cond.shift(1).fillna(False))
     return raw_buy, raw_sell
 
 def calc_levels(entry_price, sig_type, target_pct, sl_pct):
@@ -289,22 +308,25 @@ def calc_levels(entry_price, sig_type, target_pct, sl_pct):
 # ====================== SHARED FILTER-TOGGLE UI ======================
 def filter_toggle_row(key_prefix):
     st.markdown("###### ⚙️ Algo Filters (jaisa Pine Script mein hai, ON/OFF)")
-    f1, f2, f3, f4, f5, f6, f7 = st.columns(7)
+    f1, f2, f3, f4, f5, f6, f7, f8 = st.columns(8)
     with f1:
         use_ema = st.checkbox("EMA", value=True, key=f"{key_prefix}_ema")
     with f2:
         use_vwap = st.checkbox("VWAP", value=True, key=f"{key_prefix}_vwap")
     with f3:
-        use_adx = st.checkbox("ADX", value=False, key=f"{key_prefix}_adx")
+        use_adx = st.checkbox("ADX", value=True, key=f"{key_prefix}_adx")
     with f4:
-        use_vol = st.checkbox("Volume", value=False, key=f"{key_prefix}_vol")
+        use_vol = st.checkbox("Volume", value=True, key=f"{key_prefix}_vol")
     with f5:
         use_fvg = st.checkbox("FVG", value=False, key=f"{key_prefix}_fvg")
     with f6:
-        use_bos = st.checkbox("BOS", value=False, key=f"{key_prefix}_bos")
+        use_bos = st.checkbox("BOS", value=True, key=f"{key_prefix}_bos")
     with f7:
         use_ml = st.checkbox("ML (KNN)", value=True, key=f"{key_prefix}_ml")
-    return use_ema, use_vwap, use_adx, use_vol, use_fvg, use_bos, use_ml
+    with f8:
+        use_ref_candle = st.checkbox("Ref Candle", value=True, key=f"{key_prefix}_ref",
+                                       help="Daily High/Low Reference Candle: din ki pehli candle ka high/low breakout trigger banta hai.")
+    return use_ema, use_vwap, use_adx, use_vol, use_fvg, use_bos, use_ml, use_ref_candle
 
 tab_live, tab_backtest = st.tabs(["🔴 Live Signals", "📊 Backtest"])
 
@@ -325,7 +347,15 @@ with tab_live:
         ema_length = st.number_input("EMA Length", value=9, step=1, min_value=2)
 
     timeframes = st.multiselect("Timeframes Scan Karein", ["1m", "30m", "1h"], default=["1m", "30m", "1h"])
-    use_ema, use_vwap, use_adx, use_vol, use_fvg, use_bos, use_ml = filter_toggle_row("live")
+    use_ema, use_vwap, use_adx, use_vol, use_fvg, use_bos, use_ml, use_ref_candle = filter_toggle_row("live")
+
+    d1, d2 = st.columns(2)
+    with d1:
+        wait_candle_close = st.checkbox("Wait For Candle Close (Slower but Safe)", value=True,
+                                          help="ON (default): sirf poori ho chuki candle par signal — thoda slow, lekin stable/final. OFF: abhi ban rahi candle par bhi check hoga — turant milega, lekin candle close hone tak repaint (badal) sakta hai.")
+    with d2:
+        auto_refresh = st.checkbox("Auto-Refresh (har 30 sec)", value=False,
+                                     help="ON karne par page har 30 second mein khud check karega, taaki koi signal miss na ho.")
 
     if leverage > 20:
         st.warning(f"⚠️ {leverage}x leverage par ek ~{round(100/leverage,1)}% adverse price move liquidation kar sakta hai. SL zaroor lagayein.")
@@ -333,11 +363,11 @@ with tab_live:
     if st.button("🔄 अभी सिग्नल चेक करें", type="primary", use_container_width=True):
         with st.spinner("AlphaTrend + Filters Scan Chal Raha Hai..."):
             signals_found = False
-            needed = 300  # extra history so EMA/VWAP/ADX/AlphaTrend/ML all have room to warm up
 
             fetch_errors = []
             source_note_shown = False
             for tf in timeframes:
+                needed = 1500 if tf == "1m" else 300  # 1m needs ~1 day of candles so the daily Ref Candle is the real day-open, not just window-start
                 for symbol in SYMBOLS:
                     df, err, source = get_binance_data(symbol, limit=needed, interval=tf)
                     if df is None:
@@ -350,9 +380,10 @@ with tab_live:
                         st.caption("ℹ️ Futures API is server se block hai — Binance ke public **spot** data se signals chal rahe hain.")
                         source_note_shown = True
 
-                    closed = df.iloc[:-1].reset_index(drop=True)  # drop still-forming candle
+                    is_forming_candle_used = not wait_candle_close
+                    closed = df.reset_index(drop=True) if wait_candle_close is False else df.iloc[:-1].reset_index(drop=True)
                     closed = add_all_indicators(closed, ema_length=ema_length)
-                    raw_buy, raw_sell = generate_signals(closed, use_ema, use_vwap, use_adx, use_vol, use_fvg, use_bos, use_ml)
+                    raw_buy, raw_sell = generate_signals(closed, use_ema, use_vwap, use_adx, use_vol, use_fvg, use_bos, use_ml, use_ref_candle)
 
                     sig_type = None
                     if bool(raw_buy.iloc[-1]):
@@ -366,6 +397,8 @@ with tab_live:
                     row = closed.iloc[-1]
                     entry_price = float(row['Close'])
                     entry_time = row['Time'].strftime("%d %b, %I:%M %p IST")
+                    repaint_note = ("<p style='color:#facc15;font-size:12px;margin:4px 0 0;'>⚠️ Yeh abhi ban rahi candle par hai — candle close hone tak price/signal repaint (badal) sakta hai.</p>"
+                                     if is_forming_candle_used else "")
 
                     target, sl = calc_levels(entry_price, sig_type, target_pct, sl_pct)
                     notional = capital * leverage
@@ -379,6 +412,7 @@ with tab_live:
                     st.markdown(f"""
                     <div class="signal-card {card_class}">
                         <h3>{emoji} {sig_type} • {symbol} <span style="font-size:14px;color:#94a3b8;">({tf})</span></h3>
+                        {repaint_note}
                         <div class="signal-row">
                             <div class="metric-box"><div class="metric-label">Entry Price</div>
                                 <div class="metric-value">${entry_price:.4f}</div></div>
@@ -406,6 +440,7 @@ with tab_live:
                                 <div class="metric-value">{row['ADX']:.1f}</div></div>
                             <div class="metric-box"><div class="metric-label">ML Confidence</div>
                                 <div class="metric-value">{row['ML_Conf']:.0f}%</div></div>
+                            {"<div class='metric-box'><div class='metric-label'>Ref High/Low</div><div class='metric-value'>$" + format(row['RefHigh'], '.4f') + " / $" + format(row['RefLow'], '.4f') + "</div></div>" if use_ref_candle else ""}
                         </div>
                         <div class="signal-row">
                             <div class="metric-box"><div class="metric-label">Target पर Profit ({leverage}x)</div>
@@ -420,10 +455,15 @@ with tab_live:
                 st.error("Data fetch nahi ho paaya:\n\n" + "\n\n".join(fetch_errors[:3]))
             elif not signals_found:
                 st.info("**Abhi koi signal nahi mila.** Ya to trend/filters align nahi ho rahe, ya market quiet hai.")
+
+        st.caption(f"🕒 Last checked: {pd.Timestamp.now(tz=IST).strftime('%I:%M:%S %p IST')}")
+        if auto_refresh:
+            time.sleep(30)
+            st.rerun()
     else:
         st.write("**Button dabakar live signals dekhein** — AlphaTrend + selected filters align hone par entry, target, SL, EMA/VWAP/ADX/ML values aur leverage ke saath profit/nuksaan (₹) dikhega.")
 
-    st.caption("Engine: AlphaTrend (core) + EMA/VWAP/ADX/Volume/FVG/BOS/ML-KNN filters (Pine Script se port kiya gaya). Har filter alag se ON/OFF kar sakte ho. Target/SL adjustable hain, single-trade lock nahi hai — jitne bhi symbols/timeframes match karein, sabke signals aayenge. Fees/slippage/funding shaamil nahi.")
+    st.caption("Engine: AlphaTrend (core) + EMA/VWAP/ADX/Volume/FVG/BOS/Ref-Candle/ML-KNN filters (Pine Script se port kiya gaya). Default: FVG OFF, baaki sab ON — har filter alag se ON/OFF kar sakte ho. Target/SL adjustable hain, single-trade lock nahi hai. Fees/slippage/funding shaamil nahi.")
 
 # =====================================================================
 # TAB 2: BACKTEST
@@ -447,7 +487,7 @@ with tab_backtest:
     with b5:
         bt_leverage = st.number_input("Leverage (x)", value=10, step=1, min_value=1, max_value=125, key="bt_lev")
 
-    bt_use_ema, bt_use_vwap, bt_use_adx, bt_use_vol, bt_use_fvg, bt_use_bos, bt_use_ml = filter_toggle_row("bt")
+    bt_use_ema, bt_use_vwap, bt_use_adx, bt_use_vol, bt_use_fvg, bt_use_bos, bt_use_ml, bt_use_ref_candle = filter_toggle_row("bt")
 
     max_hold = st.slider("Max Holding Candles (target/SL na mile to trade band ho jaayega)", 10, 200, 60)
 
@@ -470,7 +510,7 @@ with tab_backtest:
                 closed = df.iloc[:-1].reset_index(drop=True)
                 closed = add_all_indicators(closed, ema_length=bt_ema_length)
                 raw_buy, raw_sell = generate_signals(closed, bt_use_ema, bt_use_vwap, bt_use_adx,
-                                                      bt_use_vol, bt_use_fvg, bt_use_bos, bt_use_ml)
+                                                      bt_use_vol, bt_use_fvg, bt_use_bos, bt_use_ml, bt_use_ref_candle)
 
                 signal_positions = []
                 for i in range(len(closed)):
@@ -560,7 +600,8 @@ with tab_backtest:
 
                     active_filters = []
                     for flag, name in [(bt_use_ema, "EMA"), (bt_use_vwap, "VWAP"), (bt_use_adx, "ADX"),
-                                        (bt_use_vol, "Volume"), (bt_use_fvg, "FVG"), (bt_use_bos, "BOS"), (bt_use_ml, "ML-KNN")]:
+                                        (bt_use_vol, "Volume"), (bt_use_fvg, "FVG"), (bt_use_bos, "BOS"),
+                                        (bt_use_ml, "ML-KNN"), (bt_use_ref_candle, "Ref Candle")]:
                         if flag:
                             active_filters.append(name)
                     filt_txt = ", ".join(active_filters) if active_filters else "koi filter nahi (sirf AlphaTrend)"
