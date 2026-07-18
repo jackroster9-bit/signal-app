@@ -289,9 +289,12 @@ def generate_signals(df, use_ema=True, use_vwap=True, use_adx=False, use_vol=Fal
     unified_sell = ema_put & vwap_put & adx_ok & vol_ok & fvg_short & bos_short & df['AT_Bearish'] & ml_zone
 
     if use_ref_candle:
-        # breakout above/below the day's opening reference candle, still gated by all other filters
-        buy_cond = (df['High'] >= df['RefHigh']) & unified_buy
-        sell_cond = (df['Low'] <= df['RefLow']) & unified_sell
+        # only the exact moment price CROSSES the day's opening range — not every bar
+        # after that the level stays broken (otherwise it barely filters anything post-breakout)
+        crossed_above = (df['High'] >= df['RefHigh']) & (df['High'].shift(1) < df['RefHigh'])
+        crossed_below = (df['Low'] <= df['RefLow']) & (df['Low'].shift(1) > df['RefLow'])
+        buy_cond = crossed_above & unified_buy
+        sell_cond = crossed_below & unified_sell
     else:
         buy_cond = unified_buy
         sell_cond = unified_sell
@@ -325,7 +328,7 @@ def filter_toggle_row(key_prefix):
         use_ml = st.checkbox("ML (KNN)", value=True, key=f"{key_prefix}_ml")
     with f8:
         use_ref_candle = st.checkbox("Ref Candle", value=True, key=f"{key_prefix}_ref",
-                                       help="Daily High/Low Reference Candle: din ki pehli candle ka high/low breakout trigger banta hai.")
+                                       help="Daily High/Low Reference Candle: din ki pehli candle ka high/low ek range banata hai. Signal sirf tabhi aayega jab price is range se pehli baar cross kare (baar-baar nahi, jab tak wapas range ke andar aakar dobara cross na kare).")
     return use_ema, use_vwap, use_adx, use_vol, use_fvg, use_bos, use_ml, use_ref_candle
 
 tab_live, tab_backtest = st.tabs(["🔴 Live Signals", "📊 Backtest"])
