@@ -36,7 +36,7 @@ st.markdown('<div class="main-title">Ilu Shukla\'s Sniper Pro 🎯</div>', unsaf
 st.markdown('<div class="sub-title">AlphaTrend Engine + EMA / VWAP / ADX / Volume / FVG / BOS / ML Filters</div>', unsafe_allow_html=True)
 
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "AVAXUSDT", "ADAUSDT",
-           "DOTUSDT", "XRPUSDT", "SUIUSDT", "NEARUSDT", "XAUTUSDT"]
+           "DOTUSDT", "XRPUSDT", "SUIUSDT", "NEARUSDT"]
 
 IST = pytz.timezone("Asia/Kolkata")
 
@@ -260,6 +260,7 @@ def add_all_indicators(df, ema_length=9):
     df['VWAP'] = calc_vwap_session(df)
     _, _, df['ADX'] = calc_adx(df, period=9)
     df['VolAvg3'] = df['Volume'].rolling(3).mean()
+    df['ATR'] = wilder_smooth(true_range(df), 14)
     alpha_trend, at_bull, at_bear = calc_alphatrend(df)
     df['AlphaTrend'] = alpha_trend
     df['AT_Bullish'] = at_bull
@@ -308,6 +309,11 @@ def calc_levels(entry_price, sig_type, target_pct, sl_pct):
         return entry_price * (1 + target_pct / 100), entry_price * (1 - sl_pct / 100)
     return entry_price * (1 - target_pct / 100), entry_price * (1 + sl_pct / 100)
 
+def calc_levels_atr(entry_price, sig_type, atr_value, target_atr_mult, sl_atr_mult):
+    if sig_type == "BUY":
+        return entry_price + atr_value * target_atr_mult, entry_price - atr_value * sl_atr_mult
+    return entry_price - atr_value * target_atr_mult, entry_price + atr_value * sl_atr_mult
+
 # ====================== SHARED FILTER-TOGGLE UI ======================
 def filter_toggle_row(key_prefix):
     st.markdown("###### ⚙️ Algo Filters (jaisa Pine Script mein hai, ON/OFF)")
@@ -337,11 +343,23 @@ tab_live, tab_backtest = st.tabs(["🔴 Live Signals", "📊 Backtest"])
 # TAB 1: LIVE SIGNALS
 # =====================================================================
 with tab_live:
+    sl_style = st.radio("SL / Target Style", ["Fixed %", "ATR-Based (volatility-adjusted, recommended)"],
+                         index=1, horizontal=True,
+                         help="Fixed %: har symbol/timeframe pe same % SL — crypto ke normal noise mein baar-baar SL lag sakta hai. ATR-Based: SL width us symbol/timeframe ki apni current volatility (ATR) ke hisaab se set hota hai, isliye zyada realistic hota hai.")
+
     c1, c2, c3, c4, c5 = st.columns(5)
-    with c1:
-        target_pct = st.number_input("Target %", value=1.0, step=0.1, min_value=0.1)
-    with c2:
-        sl_pct = st.number_input("Stop-Loss %", value=0.5, step=0.1, min_value=0.1)
+    if sl_style == "Fixed %":
+        with c1:
+            target_pct = st.number_input("Target %", value=1.0, step=0.1, min_value=0.1)
+        with c2:
+            sl_pct = st.number_input("Stop-Loss %", value=0.5, step=0.1, min_value=0.1)
+        target_atr_mult, sl_atr_mult = None, None
+    else:
+        with c1:
+            target_atr_mult = st.number_input("Target (x ATR)", value=2.0, step=0.1, min_value=0.1)
+        with c2:
+            sl_atr_mult = st.number_input("SL (x ATR)", value=1.0, step=0.1, min_value=0.1)
+        target_pct, sl_pct = None, None
     with c3:
         capital = st.number_input("Position Size / Margin (₹)", value=10000, step=1000, min_value=100)
     with c4:
@@ -403,11 +421,18 @@ with tab_live:
                     repaint_note = ("<p style='color:#facc15;font-size:12px;margin:4px 0 0;'>⚠️ Yeh abhi ban rahi candle par hai — candle close hone tak price/signal repaint (badal) sakta hai.</p>"
                                      if is_forming_candle_used else "")
 
-                    target, sl = calc_levels(entry_price, sig_type, target_pct, sl_pct)
+                    if sl_style == "Fixed %":
+                        target, sl = calc_levels(entry_price, sig_type, target_pct, sl_pct)
+                        eff_target_pct, eff_sl_pct = target_pct, sl_pct
+                    else:
+                        atr_val = float(row['ATR'])
+                        target, sl = calc_levels_atr(entry_price, sig_type, atr_val, target_atr_mult, sl_atr_mult)
+                        eff_target_pct = abs(target - entry_price) / entry_price * 100
+                        eff_sl_pct = abs(entry_price - sl) / entry_price * 100
                     notional = capital * leverage
-                    profit_amt = notional * (target_pct / 100)
-                    loss_amt = notional * (sl_pct / 100)
-                    rr_ratio = round(target_pct / sl_pct, 2)
+                    profit_amt = notional * (eff_target_pct / 100)
+                    loss_amt = notional * (eff_sl_pct / 100)
+                    rr_ratio = round(eff_target_pct / eff_sl_pct, 2)
 
                     card_class = "buy-card" if sig_type == "BUY" else "sell-card"
                     emoji = "🟢" if sig_type == "BUY" else "🔴"
@@ -431,6 +456,14 @@ with tab_live:
                                 <div class="metric-value loss">${sl:.4f}</div></div>
                             <div class="metric-box"><div class="metric-label">Risk:Reward</div>
                                 <div class="metric-value">1 : {rr_ratio}</div></div>
+                        </div>
+                        <div class="signal-row">
+                            <div class="metric-box"><div class="metric-label">Effective Target%</div>
+                                <div class="metric-value profit">{eff_target_pct:.2f}%</div></div>
+                            <div class="metric-box"><div class="metric-label">Effective SL%</div>
+                                <div class="metric-value loss">{eff_sl_pct:.2f}%</div></div>
+                            <div class="metric-box"><div class="metric-label">ATR(14)</div>
+                                <div class="metric-value">${row['ATR']:.4f}</div></div>
                         </div>
                         <div class="signal-row">
                             <div class="metric-box"><div class="metric-label">AlphaTrend</div>
@@ -473,6 +506,9 @@ with tab_live:
 # =====================================================================
 with tab_backtest:
     st.markdown("#### Historical data par AlphaTrend + Filters test karo")
+    bt_sl_style = st.radio("SL / Target Style", ["Fixed %", "ATR-Based (volatility-adjusted, recommended)"],
+                            index=1, horizontal=True, key="bt_sl_style")
+
     b1, b2, b3 = st.columns(3)
     with b1:
         bt_symbol = st.selectbox("Symbol", SYMBOLS, index=0)
@@ -481,14 +517,21 @@ with tab_backtest:
         bt_candles = st.slider("Kitne Candles Test Karein", 200, 1000, 500, step=50)
         bt_ema_length = st.number_input("EMA Length", value=9, step=1, min_value=2, key="bt_ema_len")
     with b3:
-        bt_target_pct = st.number_input("Target %", value=1.0, step=0.1, min_value=0.1, key="bt_tp")
-        bt_sl_pct = st.number_input("Stop-Loss %", value=0.5, step=0.1, min_value=0.1, key="bt_sl")
+        if bt_sl_style == "Fixed %":
+            bt_target_pct = st.number_input("Target %", value=1.0, step=0.1, min_value=0.1, key="bt_tp")
+            bt_sl_pct = st.number_input("Stop-Loss %", value=0.5, step=0.1, min_value=0.1, key="bt_sl")
+            bt_target_atr_mult, bt_sl_atr_mult = None, None
+        else:
+            bt_target_atr_mult = st.number_input("Target (x ATR)", value=2.0, step=0.1, min_value=0.1, key="bt_tp_atr")
+            bt_sl_atr_mult = st.number_input("SL (x ATR)", value=1.0, step=0.1, min_value=0.1, key="bt_sl_atr")
+            bt_target_pct, bt_sl_pct = None, None
 
     b4, b5 = st.columns(2)
     with b4:
         bt_capital = st.number_input("Har Trade Ka Position Size / Margin (₹)", value=10000, step=1000, min_value=100, key="bt_cap")
     with b5:
         bt_leverage = st.number_input("Leverage (x)", value=10, step=1, min_value=1, max_value=125, key="bt_lev")
+
 
     bt_use_ema, bt_use_vwap, bt_use_adx, bt_use_vol, bt_use_fvg, bt_use_bos, bt_use_ml, bt_use_ref_candle = filter_toggle_row("bt")
 
@@ -528,7 +571,16 @@ with tab_backtest:
                         continue
                     entry_price = float(closed['Close'].iloc[entry_pos])
                     entry_time = closed['Time'].iloc[entry_pos]
-                    target, sl = calc_levels(entry_price, sig_type, bt_target_pct, bt_sl_pct)
+
+                    if bt_sl_style == "Fixed %":
+                        target, sl = calc_levels(entry_price, sig_type, bt_target_pct, bt_sl_pct)
+                        eff_target_pct = bt_target_pct
+                        eff_sl_pct = bt_sl_pct
+                    else:
+                        atr_val = float(closed['ATR'].iloc[entry_pos])
+                        target, sl = calc_levels_atr(entry_price, sig_type, atr_val, bt_target_atr_mult, bt_sl_atr_mult)
+                        eff_target_pct = abs(target - entry_price) / entry_price * 100
+                        eff_sl_pct = abs(entry_price - sl) / entry_price * 100
 
                     outcome, exit_time, bars_held = "OPEN", None, 0
                     for j in range(entry_pos + 1, min(entry_pos + 1 + max_hold, len(closed))):
@@ -548,7 +600,7 @@ with tab_backtest:
                             outcome, exit_time = "LOSS", closed['Time'].iloc[j]
                             break
 
-                    pnl_pct = bt_target_pct if outcome == "WIN" else (-bt_sl_pct if outcome == "LOSS" else 0)
+                    pnl_pct = eff_target_pct if outcome == "WIN" else (-eff_sl_pct if outcome == "LOSS" else 0)
                     notional = bt_capital * bt_leverage
                     pnl_amt = notional * (pnl_pct / 100)
 
