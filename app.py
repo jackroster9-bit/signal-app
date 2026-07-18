@@ -36,7 +36,7 @@ st.markdown('<div class="main-title">Ilu Shukla\'s Sniper Pro 🎯</div>', unsaf
 st.markdown('<div class="sub-title">AlphaTrend Engine + EMA / VWAP / ADX / Volume / FVG / BOS / ML Filters</div>', unsafe_allow_html=True)
 
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "AVAXUSDT", "ADAUSDT",
-           "DOTUSDT", "XRPUSDT", "SUIUSDT", "NEARUSDT"]
+           "DOTUSDT", "XRPUSDT", "SUIUSDT", "NEARUSDT", "XAUTUSDT"]
 
 IST = pytz.timezone("Asia/Kolkata")
 
